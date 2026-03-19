@@ -149,7 +149,7 @@
 
 <script>
 // ===== State =====
-const CORSPROXY = 'https://corsproxy.io/?';
+const CORSPROXY = 'https://api.allorigins.win/get?url=';
 
 const DEFAULT_FEEDS = [
   { id: 'xda-selfhosted', name: 'XDA Self-Hosted', url: 'https://www.xda-developers.com/feed/', color: '#f97316' },
@@ -202,7 +202,8 @@ async function fetchFeed(feed) {
   try {
     const res = await fetch(CORSPROXY + encodeURIComponent(feed.url));
     if (!res.ok) throw new Error('Network error');
-    const xml = await res.text();
+    const data = await res.json();
+    const xml = data.contents;
     const doc = new DOMParser().parseFromString(xml, 'application/xml');
     const isAtom = !!doc.querySelector('feed');
     const items = isAtom ? [...doc.querySelectorAll('feed > entry')] : [...doc.querySelectorAll('channel > item')];
