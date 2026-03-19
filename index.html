@@ -149,7 +149,7 @@
 
 <script>
 // ===== State =====
-const RSS2JSON_API = 'https://api.rss2json.com/v1/api.json';
+const FEED2JSON_API = 'https://www.toptal.com/developers/feed2json/convert';
 
 const DEFAULT_FEEDS = [
   { id: 'xda-selfhosted', name: 'XDA Self-Hosted', url: 'https://www.xda-developers.com/feed/', color: '#f97316' },
@@ -200,21 +200,20 @@ async function fetchFeed(feed) {
   state.loading[feed.id] = true;
   renderFeedList();
   try {
-    const url = `${RSS2JSON_API}?rss_url=${encodeURIComponent(feed.url)}&count=30`;
+    const url = `${FEED2JSON_API}?url=${encodeURIComponent(feed.url)}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error('Network error');
     const data = await res.json();
-    if (data.status !== 'ok') throw new Error(data.message || 'Feed error');
     const articles = (data.items || []).map(item => ({
-      id: item.guid || item.link || item.title,
+      id: item.id || item.url || item.title,
       feedId: feed.id,
       feedName: feed.name,
       feedColor: feed.color,
       title: item.title || '（タイトルなし）',
-      link: item.link || '#',
-      pubDate: item.pubDate || '',
-      description: stripHtml(item.description || item.content || ''),
-      thumbnail: item.thumbnail || extractImage(item.content || item.description || ''),
+      link: item.url || '#',
+      pubDate: item.date_published || '',
+      description: stripHtml(item.summary || ''),
+      thumbnail: extractImage(item.summary || ''),
     }));
     state.articles[feed.id] = articles;
     saveArticles();
