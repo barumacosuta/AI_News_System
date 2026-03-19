@@ -149,7 +149,7 @@
 
 <script>
 // ===== State =====
-const FEED2JSON_API = 'https://www.toptal.com/developers/feed2json/convert';
+const CORSPROXY = 'https://corsproxy.io/?';
 
 const DEFAULT_FEEDS = [
   { id: 'xda-selfhosted', name: 'XDA Self-Hosted', url: 'https://www.xda-developers.com/feed/', color: '#f97316' },
@@ -200,21 +200,30 @@ async function fetchFeed(feed) {
   state.loading[feed.id] = true;
   renderFeedList();
   try {
-    const url = `${FEED2JSON_API}?url=${encodeURIComponent(feed.url)}`;
-    const res = await fetch(url);
+    const res = await fetch(CORSPROXY + encodeURIComponent(feed.url));
     if (!res.ok) throw new Error('Network error');
-    const data = await res.json();
-    const articles = (data.items || []).map(item => ({
-      id: item.id || item.url || item.title,
-      feedId: feed.id,
-      feedName: feed.name,
-      feedColor: feed.color,
-      title: item.title || '（タイトルなし）',
-      link: item.url || '#',
-      pubDate: item.date_published || '',
-      description: stripHtml(item.summary || ''),
-      thumbnail: extractImage(item.summary || ''),
-    }));
+    const xml = await res.text();
+    const doc = new DOMParser().parseFromString(xml, 'application/xml');
+    const isAtom = !!doc.querySelector('feed');
+    const items = isAtom ? [...doc.querySelectorAll('feed > entry')] : [...doc.querySelectorAll('channel > item')];
+    const articles = items.slice(0, 10).map(item => {
+      const text = sel => item.querySelector(sel)?.textContent?.trim() || '';
+      const link = isAtom
+        ? (item.querySelector('link[rel="alternate"]')?.getAttribute('href') || item.querySelector('link')?.getAttribute('href') || text('id'))
+        : (text('link') || item.querySelector('link')?.nextSibling?.textContent?.trim() || '');
+      const rawBody = isAtom ? (text('content') || text('summary')) : (text('description') || text('content\\:encoded'));
+      return {
+        id: text('id') || text('guid') || link,
+        feedId: feed.id,
+        feedName: feed.name,
+        feedColor: feed.color,
+        title: text('title') || '（タイトルなし）',
+        link: link || '#',
+        pubDate: isAtom ? (text('published') || text('updated')) : text('pubDate'),
+        description: stripHtml(rawBody),
+        thumbnail: extractImage(rawBody),
+      };
+    });
     state.articles[feed.id] = articles;
     saveArticles();
   } catch (e) {
