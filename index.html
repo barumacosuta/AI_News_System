@@ -200,7 +200,7 @@ async function fetchFeed(feed) {
   state.loading[feed.id] = true;
   renderFeedList();
   try {
-    const url = `${FEED2JSON_API}?url=${encodeURIComponent(feed.url)}`;
+    const url = `${FEED2JSON_API}?url=${encodeURIComponent(feed.url)}&count=10`;
     const res = await fetch(url);
     if (!res.ok) throw new Error('Network error');
     const data = await res.json();
