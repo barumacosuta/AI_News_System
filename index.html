@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="ja" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ITニュース RSSリーダー</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            surface: {
+              900: '#0f1117',
+              800: '#161b22',
+              700: '#21262d',
+              600: '#30363d',
+              500: '#3d4450',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { background-color: #0f1117; }
+    .feed-item { transition: background 0.15s; }
+    .feed-item:hover { background-color: #21262d; }
+    .article-card { transition: transform 0.15s, box-shadow 0.15s; }
+    .article-card:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(0,0,0,0.4); }
+    .unread-dot { width: 8px; height: 8px; border-radius: 50%; background: #58a6ff; flex-shrink: 0; }
+    .spinner { border: 3px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; width: 32px; height: 32px; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #161b22; }
+    ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3d4450; }
+    .tag-badge { font-size: 0.7rem; padding: 1px 6px; border-radius: 9999px; }
+  </style>
+</head>
+<body class="text-gray-200 min-h-screen font-sans">
+
+<!-- Header -->
+<header class="border-b border-gray-700 bg-surface-800 sticky top-0 z-50" style="background:#161b22">
+  <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+    <div class="flex items-center gap-3">
+      <svg class="w-7 h-7 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 5c7.18 0 13 5.82 13 13M6 11a7 7 0 017 7M6 17a1 1 0 110 2 1 1 0 010-2z"/>
+      </svg>
+      <h1 class="text-xl font-bold text-white tracking-tight">ITニュース RSSリーダー</h1>
+    </div>
+    <div class="flex items-center gap-2">
+      <button id="btn-refresh-all" onclick="refreshAll()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        全て更新
+      </button>
+      <button onclick="markAllRead()" class="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm font-medium transition-colors">
+        全既読
+      </button>
+      <button onclick="openAddFeedModal()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-700 hover:bg-green-600 text-white text-sm font-medium transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        フィード追加
+      </button>
+    </div>
+  </div>
+</header>
+
+<div class="max-w-7xl mx-auto px-4 py-6 flex gap-6">
+
+  <!-- Sidebar -->
+  <aside class="w-64 flex-shrink-0">
+    <div class="rounded-xl border border-gray-700 overflow-hidden" style="background:#161b22">
+      <div class="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
+        <span class="text-sm font-semibold text-gray-300">フィード一覧</span>
+        <span id="total-unread" class="tag-badge bg-blue-900 text-blue-300">0</span>
+      </div>
+      <ul id="feed-list" class="py-1"></ul>
+    </div>
+
+    <!-- Stats -->
+    <div class="mt-4 rounded-xl border border-gray-700 p-4" style="background:#161b22">
+      <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">統計</p>
+      <div class="space-y-2 text-sm text-gray-400">
+        <div class="flex justify-between"><span>記事数</span><span id="stat-total" class="text-white font-medium">0</span></div>
+        <div class="flex justify-between"><span>未読</span><span id="stat-unread" class="text-blue-400 font-medium">0</span></div>
+        <div class="flex justify-between"><span>既読</span><span id="stat-read" class="text-gray-500 font-medium">0</span></div>
+      </div>
+    </div>
+
+    <!-- Filter -->
+    <div class="mt-4 rounded-xl border border-gray-700 p-4" style="background:#161b22">
+      <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">フィルター</p>
+      <div class="space-y-1">
+        <button onclick="setFilter('all')" id="filter-all" class="filter-btn w-full text-left px-3 py-1.5 rounded-lg text-sm text-white bg-gray-700">すべて</button>
+        <button onclick="setFilter('unread')" id="filter-unread" class="filter-btn w-full text-left px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:bg-gray-700 transition-colors">未読のみ</button>
+        <button onclick="setFilter('read')" id="filter-read" class="filter-btn w-full text-left px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:bg-gray-700 transition-colors">既読のみ</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="flex-1 min-w-0">
+    <!-- Search bar -->
+    <div class="mb-4 relative">
+      <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+      <input id="search-input" oninput="applyFilters()" type="text" placeholder="記事を検索..." class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-700 bg-gray-800 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 text-sm" />
+    </div>
+
+    <!-- Loading state -->
+    <div id="loading-state" class="flex flex-col items-center justify-center py-20 gap-4">
+      <div class="spinner"></div>
+      <p class="text-gray-400 text-sm">フィードを読み込み中...</p>
+    </div>
+
+    <!-- Empty state -->
+    <div id="empty-state" class="hidden flex flex-col items-center justify-center py-20 gap-3 text-gray-500">
+      <svg class="w-16 h-16 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"/></svg>
+      <p class="text-lg font-medium">記事がありません</p>
+      <p class="text-sm">フィードを更新するか、フィルターを変更してください</p>
+    </div>
+
+    <!-- Articles grid -->
+    <div id="articles-grid" class="hidden grid grid-cols-1 lg:grid-cols-2 gap-4"></div>
+  </main>
+</div>
+
+<!-- Add Feed Modal -->
+<div id="modal-overlay" class="fixed inset-0 bg-black/60 z-50 hidden flex items-center justify-center p-4">
+  <div class="rounded-2xl border border-gray-700 w-full max-w-md p-6" style="background:#161b22">
+    <h2 class="text-lg font-bold text-white mb-4">フィードを追加</h2>
+    <div class="space-y-3">
+      <div>
+        <label class="text-sm text-gray-400 mb-1 block">フィード名</label>
+        <input id="new-feed-name" type="text" placeholder="例: Hacker News" class="w-full px-3 py-2 rounded-lg border border-gray-600 bg-gray-800 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 text-sm" />
+      </div>
+      <div>
+        <label class="text-sm text-gray-400 mb-1 block">RSS URL</label>
+        <input id="new-feed-url" type="url" placeholder="https://example.com/feed" class="w-full px-3 py-2 rounded-lg border border-gray-600 bg-gray-800 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 text-sm" />
+      </div>
+      <p id="modal-error" class="text-red-400 text-xs hidden"></p>
+    </div>
+    <div class="flex gap-3 mt-5">
+      <button onclick="closeAddFeedModal()" class="flex-1 px-4 py-2 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700 text-sm transition-colors">キャンセル</button>
+      <button onclick="addFeed()" class="flex-1 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors">追加</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== State =====
+const RSS2JSON_API = 'https://api.rss2json.com/v1/api.json';
+
+const DEFAULT_FEEDS = [
+  { id: 'xda-selfhosted', name: 'XDA Self-Hosted', url: 'https://www.xda-developers.com/feed/', color: '#f97316' },
+  { id: 'hackernews', name: 'Hacker News', url: 'https://news.ycombinator.com/rss', color: '#fb923c' },
+  { id: 'zenn-ai', name: 'Zenn AI', url: 'https://zenn.dev/topics/ai/feed', color: '#3b82f6' },
+  { id: 'zenn-claudecode', name: 'Zenn Claude Code', url: 'https://zenn.dev/topics/claudecode/feed', color: '#a78bfa' },
+  { id: 'deepmind', name: 'Google DeepMind', url: 'https://deepmind.google/blog/rss.xml', color: '#4ade80' },
+];
+
+let state = {
+  feeds: [],
+  articles: {},   // feedId -> article[]
+  readIds: new Set(),
+  selectedFeed: 'all',
+  filter: 'all',
+  loading: {},    // feedId -> bool
+};
+
+// ===== Storage =====
+function saveFeeds() {
+  localStorage.setItem('rss_feeds', JSON.stringify(state.feeds));
+}
+function saveReadIds() {
+  localStorage.setItem('rss_read', JSON.stringify([...state.readIds]));
+}
+function saveArticles() {
+  const plain = {};
+  for (const [k, v] of Object.entries(state.articles)) plain[k] = v;
+  localStorage.setItem('rss_articles', JSON.stringify(plain));
+}
+function loadState() {
+  try {
+    const feeds = localStorage.getItem('rss_feeds');
+    state.feeds = feeds ? JSON.parse(feeds) : DEFAULT_FEEDS.map(f => ({ ...f }));
+  } catch { state.feeds = DEFAULT_FEEDS.map(f => ({ ...f })); }
+  try {
+    const read = localStorage.getItem('rss_read');
+    state.readIds = new Set(read ? JSON.parse(read) : []);
+  } catch { state.readIds = new Set(); }
+  try {
+    const arts = localStorage.getItem('rss_articles');
+    state.articles = arts ? JSON.parse(arts) : {};
+  } catch { state.articles = {}; }
+}
+
+// ===== Feed fetching =====
+async function fetchFeed(feed) {
+  state.loading[feed.id] = true;
+  renderFeedList();
+  try {
+    const url = `${RSS2JSON_API}?rss_url=${encodeURIComponent(feed.url)}&count=30`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Network error');
+    const data = await res.json();
+    if (data.status !== 'ok') throw new Error(data.message || 'Feed error');
+    const articles = (data.items || []).map(item => ({
+      id: item.guid || item.link || item.title,
+      feedId: feed.id,
+      feedName: feed.name,
+      feedColor: feed.color,
+      title: item.title || '（タイトルなし）',
+      link: item.link || '#',
+      pubDate: item.pubDate || '',
+      description: stripHtml(item.description || item.content || ''),
+      thumbnail: item.thumbnail || extractImage(item.content || item.description || ''),
+    }));
+    state.articles[feed.id] = articles;
+    saveArticles();
+  } catch (e) {
+    console.error(`Feed fetch error [${feed.name}]:`, e);
+  } finally {
+    state.loading[feed.id] = false;
+    renderFeedList();
+    applyFilters();
+  }
+}
+
+function stripHtml(html) {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  return (tmp.textContent || tmp.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
+function extractImage(html) {
+  const m = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+  return m ? m[1] : null;
+}
+
+async function refreshAll() {
+  const btn = document.getElementById('btn-refresh-all');
+  btn.disabled = true;
+  btn.textContent = '更新中...';
+  await Promise.all(state.feeds.map(f => fetchFeed(f)));
+  btn.disabled = false;
+  btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>全て更新`;
+}
+
+// ===== Rendering =====
+function renderFeedList() {
+  const ul = document.getElementById('feed-list');
+  const allUnread = getAllArticles().filter(a => !state.readIds.has(a.id)).length;
+  document.getElementById('total-unread').textContent = allUnread;
+
+  ul.innerHTML = `
+    <li class="feed-item cursor-pointer px-4 py-2.5 flex items-center justify-between gap-2 ${state.selectedFeed === 'all' ? 'bg-gray-700' : ''}"
+        onclick="selectFeed('all')">
+      <span class="text-sm text-gray-200 truncate">すべてのフィード</span>
+      ${allUnread > 0 ? `<span class="tag-badge bg-blue-900 text-blue-300">${allUnread}</span>` : ''}
+    </li>
+  ` + state.feeds.map(feed => {
+    const arts = state.articles[feed.id] || [];
+    const unread = arts.filter(a => !state.readIds.has(a.id)).length;
+    const isLoading = state.loading[feed.id];
+    const isActive = state.selectedFeed === feed.id;
+    return `
+      <li class="feed-item cursor-pointer px-4 py-2.5 flex items-center justify-between gap-2 ${isActive ? 'bg-gray-700' : ''}"
+          onclick="selectFeed('${feed.id}')">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="w-2 h-2 rounded-full flex-shrink-0" style="background:${feed.color}"></span>
+          <span class="text-sm text-gray-300 truncate">${escHtml(feed.name)}</span>
+        </div>
+        <div class="flex items-center gap-1.5 flex-shrink-0">
+          ${isLoading ? '<div class="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin"></div>' : ''}
+          ${unread > 0 ? `<span class="tag-badge bg-blue-900 text-blue-300">${unread}</span>` : ''}
+          <button onclick="event.stopPropagation(); deleteFeed('${feed.id}')" class="text-gray-600 hover:text-red-400 transition-colors ml-1" title="削除">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </li>
+    `;
+  }).join('');
+}
+
+function getAllArticles() {
+  const all = [];
+  for (const arts of Object.values(state.articles)) all.push(...arts);
+  all.sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate));
+  return all;
+}
+
+function getDisplayArticles() {
+  let articles = state.selectedFeed === 'all'
+    ? getAllArticles()
+    : (state.articles[state.selectedFeed] || []);
+
+  if (state.filter === 'unread') articles = articles.filter(a => !state.readIds.has(a.id));
+  if (state.filter === 'read') articles = articles.filter(a => state.readIds.has(a.id));
+
+  const q = document.getElementById('search-input')?.value.trim().toLowerCase() || '';
+  if (q) articles = articles.filter(a =>
+    a.title.toLowerCase().includes(q) ||
+    a.description.toLowerCase().includes(q) ||
+    a.feedName.toLowerCase().includes(q)
+  );
+
+  return articles;
+}
+
+function applyFilters() {
+  const articles = getDisplayArticles();
+  const grid = document.getElementById('articles-grid');
+  const empty = document.getElementById('empty-state');
+  const loading = document.getElementById('loading-state');
+
+  const anyLoading = Object.values(state.loading).some(Boolean);
+  const hasArticles = Object.values(state.articles).some(a => a.length > 0);
+
+  if (anyLoading && !hasArticles) {
+    loading.classList.remove('hidden');
+    grid.classList.add('hidden');
+    empty.classList.add('hidden');
+    return;
+  }
+  loading.classList.add('hidden');
+
+  if (articles.length === 0) {
+    empty.classList.remove('hidden');
+    grid.classList.add('hidden');
+  } else {
+    empty.classList.add('hidden');
+    grid.classList.remove('hidden');
+    grid.innerHTML = articles.map(renderArticle).join('');
+  }
+
+  // Stats
+  const all = getAllArticles();
+  const unreadCount = all.filter(a => !state.readIds.has(a.id)).length;
+  document.getElementById('stat-total').textContent = all.length;
+  document.getElementById('stat-unread').textContent = unreadCount;
+  document.getElementById('stat-read').textContent = all.length - unreadCount;
+  document.getElementById('total-unread').textContent = unreadCount;
+}
+
+function renderArticle(article) {
+  const isRead = state.readIds.has(article.id);
+  const date = article.pubDate ? formatDate(article.pubDate) : '';
+  const safeId = CSS.escape(article.id);
+
+  return `
+    <div class="article-card rounded-xl border ${isRead ? 'border-gray-800 opacity-60' : 'border-gray-700'} overflow-hidden cursor-pointer"
+         style="background:#161b22"
+         onclick="openArticle('${escAttr(article.id)}', '${escAttr(article.link)}')">
+      ${article.thumbnail ? `<img src="${escAttr(article.thumbnail)}" alt="" class="w-full h-36 object-cover" onerror="this.style.display='none'" loading="lazy" />` : ''}
+      <div class="p-4">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="w-2 h-2 rounded-full flex-shrink-0" style="background:${article.feedColor}"></span>
+          <span class="text-xs text-gray-500 truncate">${escHtml(article.feedName)}</span>
+          ${!isRead ? '<span class="unread-dot ml-auto"></span>' : ''}
+        </div>
+        <h3 class="text-sm font-semibold text-white leading-snug mb-2 line-clamp-2">${escHtml(article.title)}</h3>
+        ${article.description ? `<p class="text-xs text-gray-500 leading-relaxed line-clamp-2">${escHtml(article.description)}</p>` : ''}
+        <div class="flex items-center justify-between mt-3">
+          <span class="text-xs text-gray-600">${date}</span>
+          <button onclick="event.stopPropagation(); toggleRead('${escAttr(article.id)}')"
+                  class="text-xs px-2 py-1 rounded-md ${isRead ? 'bg-gray-800 text-gray-500 hover:bg-gray-700' : 'bg-blue-900/50 text-blue-400 hover:bg-blue-900'} transition-colors">
+            ${isRead ? '未読に戻す' : '既読'}
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function formatDate(dateStr) {
+  try {
+    const d = new Date(dateStr);
+    const now = new Date();
+    const diff = now - d;
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}分前`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}時間前`;
+    if (diff < 604800000) return `${Math.floor(diff / 86400000)}日前`;
+    return d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
+  } catch { return ''; }
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(str) {
+  return String(str).replace(/'/g, "\\'").replace(/\n/g, '');
+}
+
+// ===== Actions =====
+function openArticle(id, url) {
+  markRead(id);
+  window.open(url, '_blank', 'noopener');
+}
+
+function markRead(id) {
+  if (state.readIds.has(id)) return;
+  state.readIds.add(id);
+  saveReadIds();
+  applyFilters();
+  renderFeedList();
+}
+
+function toggleRead(id) {
+  if (state.readIds.has(id)) {
+    state.readIds.delete(id);
+  } else {
+    state.readIds.add(id);
+  }
+  saveReadIds();
+  applyFilters();
+  renderFeedList();
+}
+
+function markAllRead() {
+  const articles = getDisplayArticles();
+  articles.forEach(a => state.readIds.add(a.id));
+  saveReadIds();
+  applyFilters();
+  renderFeedList();
+}
+
+function selectFeed(id) {
+  state.selectedFeed = id;
+  renderFeedList();
+  applyFilters();
+}
+
+function setFilter(f) {
+  state.filter = f;
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.classList.remove('bg-gray-700', 'text-white');
+    btn.classList.add('text-gray-400');
+  });
+  const active = document.getElementById(`filter-${f}`);
+  if (active) {
+    active.classList.add('bg-gray-700', 'text-white');
+    active.classList.remove('text-gray-400');
+  }
+  applyFilters();
+}
+
+function deleteFeed(id) {
+  if (!confirm('このフィードを削除しますか？')) return;
+  state.feeds = state.feeds.filter(f => f.id !== id);
+  delete state.articles[id];
+  if (state.selectedFeed === id) state.selectedFeed = 'all';
+  saveFeeds();
+  saveArticles();
+  renderFeedList();
+  applyFilters();
+}
+
+// ===== Modal =====
+function openAddFeedModal() {
+  document.getElementById('new-feed-name').value = '';
+  document.getElementById('new-feed-url').value = '';
+  document.getElementById('modal-error').classList.add('hidden');
+  document.getElementById('modal-overlay').classList.remove('hidden');
+  setTimeout(() => document.getElementById('new-feed-name').focus(), 50);
+}
+
+function closeAddFeedModal() {
+  document.getElementById('modal-overlay').classList.add('hidden');
+}
+
+async function addFeed() {
+  const name = document.getElementById('new-feed-name').value.trim();
+  const url = document.getElementById('new-feed-url').value.trim();
+  const errEl = document.getElementById('modal-error');
+
+  if (!name) { showModalError('フィード名を入力してください'); return; }
+  if (!url) { showModalError('URLを入力してください'); return; }
+  try { new URL(url); } catch { showModalError('正しいURLを入力してください'); return; }
+  if (state.feeds.some(f => f.url === url)) { showModalError('このフィードは既に登録されています'); return; }
+
+  const colors = ['#f97316','#3b82f6','#a78bfa','#4ade80','#f43f5e','#facc15','#06b6d4','#ec4899'];
+  const color = colors[state.feeds.length % colors.length];
+  const id = 'feed_' + Date.now();
+  const feed = { id, name, url, color };
+  state.feeds.push(feed);
+  saveFeeds();
+  closeAddFeedModal();
+  renderFeedList();
+  await fetchFeed(feed);
+}
+
+function showModalError(msg) {
+  const el = document.getElementById('modal-error');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+// Close modal on overlay click
+document.getElementById('modal-overlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeAddFeedModal();
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeAddFeedModal();
+  if ((e.metaKey || e.ctrlKey) && e.key === 'r') { e.preventDefault(); refreshAll(); }
+});
+
+// ===== Init =====
+(async function init() {
+  loadState();
+  renderFeedList();
+
+  if (Object.keys(state.articles).length > 0) {
+    // Show cached articles immediately
+    applyFilters();
+  }
+
+  // Fetch in background
+  Promise.all(state.feeds.map(f => fetchFeed(f)));
+})();
+</script>
+</body>
+</html>
